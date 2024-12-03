@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/quic-go/quic-go"
 )
 
 const (
-	Cert = "/home/om26er/scm/xconnio/quic-vpn/cert.pem"
-	Key  = "/home/om26er/scm/xconnio/quic-vpn/key.pem"
+	Cert = "cert.pem"
+	Key  = "key.pem"
 )
 
 func main() {
@@ -24,7 +26,18 @@ func main() {
 		InsecureSkipVerify: true,
 		Certificates:       []tls.Certificate{cert},
 	}
-	quicConf := &quic.Config{}
+	quicConf := &quic.Config{
+		EnableDatagrams: true,
+	}
+
+	//config := water.Config{
+	//	DeviceType: water.TUN,
+	//}
+
+	//iface, err := water.New(config)
+	//if err != nil {
+	//	log.Fatal(err)
+	//}
 
 	ln, err := quic.ListenAddr("localhost:1234", tlsConf, quicConf)
 	if err != nil {
@@ -32,18 +45,42 @@ func main() {
 	}
 
 	for {
-		conn, err := ln.Accept(context.Background())
+		quicConn, err := ln.Accept(context.Background())
 		if err != nil {
 			log.Fatal(err)
 		}
 
 		go func(quicConn quic.Connection) {
-			stream, err := conn.AcceptStream(context.Background())
-			if err != nil {
-				log.Fatal(err)
-			}
+			for {
+				data, err := quicConn.ReceiveDatagram(context.Background())
+				if err != nil {
+					log.Fatal(err)
+				}
 
-			fmt.Println("new stream", stream.StreamID())
-		}(conn)
+				p := gopacket.NewPacket(data, layers.LayerTypeIPv6, gopacket.DecodeStreamsAsDatagrams)
+				fmt.Println(p)
+
+				//if _, err = iface.Write(data); err != nil {
+				//	log.Fatal(err)
+				//}
+			}
+		}(quicConn)
+
+		//go func() {
+		//	// read IP packets from the TUN interface and forward to the server
+		//	data := make([]byte, 1500)
+		//	for {
+		//		count, err := iface.Read(data)
+		//		if err != nil {
+		//			log.Fatal(err)
+		//		}
+		//
+		//		fmt.Println(count, string(data[:count]))
+		//
+		//		if err = quicConn.SendDatagram(data[:count]); err != nil {
+		//			log.Fatal(err)
+		//		}
+		//	}
+		//}()
 	}
 }

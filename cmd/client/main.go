@@ -3,35 +3,60 @@ package main
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
-	"github.com/quic-go/quic-go"
+	"fmt"
 	"log"
-	"os"
+
+	"github.com/quic-go/quic-go"
+	"github.com/songgao/water"
 )
 
 func main() {
-	certPool := x509.NewCertPool()
-	cert, err := os.ReadFile("/home/om26er/scm/xconnio/quic-vpn/cert.pem")
-	if err != nil {
-		panic(err)
-	}
-	certPool.AppendCertsFromPEM(cert)
-
 	tlsConf := &tls.Config{
 		InsecureSkipVerify: true,
-		RootCAs:            certPool,
 	}
-	quicConf := &quic.Config{}
+	quicConf := &quic.Config{
+		EnableDatagrams: true,
+	}
 
 	quicConn, err := quic.DialAddr(context.Background(), "localhost:1234", tlsConf, quicConf)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	stream, err := quicConn.OpenStreamSync(context.Background())
+	config := water.Config{
+		DeviceType: water.TUN,
+	}
+
+	iface, err := water.New(config)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	println(stream.StreamID())
+	// read IP packets from the other end and send to the TUN interface
+	go func() {
+		data, err := quicConn.ReceiveDatagram(context.Background())
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		_, err = iface.Write(data)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// read IP packets from the TUN interface and forward to the server
+	data := make([]byte, 1500)
+	for {
+		count, err := iface.Read(data)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println(count, string(data[:count]))
+
+		if err = quicConn.SendDatagram(data[:count]); err != nil {
+			log.Fatal(err)
+		}
+	}
 }
